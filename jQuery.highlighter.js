@@ -15,65 +15,28 @@
  * for more details.
  */
 
-   (function ($) {
-    /*
-     * Code for triple click from
-     * http://css-tricks.com/snippets/jquery/triple-click-event/
-     */
-    $.event.special.tripleclick = {
+/*
+* Original library highly edited by Chuck Rea <chuckr523@mac.com>
+*
+* This version more closely mirrors the functionality of the comment mechanism
+* used on Medium.com
+*
+* This version does NOT handle triple click events as they seemed to prove unpredictable and unstable
+* (and are also NOT handled/permitted in Medium)
+*
+* For a full Medium.com style comments experience, please use this library
+* in conjunction with the excellent SideCommments.js
+*
+* https://github.com/aroc/side-comments
+*
+* Note: Any parameters may be passed to the 'complete' callback function (called on line 147).
+* The currently passed parameters are specific to the author's needs.
+*
+* */
 
-        setup: function (data, namespaces) {
-            var elem = this,
-                $elem = jQuery(elem);
-            $elem.bind('click', jQuery.event.special.tripleclick.handler);
-        },
-
-        teardown: function (namespaces) {
-            var elem = this,
-                $elem = jQuery(elem);
-            $elem.unbind('click', jQuery.event.special.tripleclick.handler);
-        },
-
-        handler: function (event) {
-            var elem = this,
-                $elem = jQuery(elem),
-                clicks = $elem.data('clicks') || 0;
-            clicks += 1;
-            if (clicks === 3) {
-                clicks = 0;
-
-                // set event type to "tripleclick"
-                event.type = "tripleclick";
-
-                // let jQuery handle the triggering of "tripleclick" event handlers
-                jQuery.event.dispatch.apply(this, arguments);
-            }
-            $elem.data('clicks', clicks);
-        }
-    };
-
-    /*
-     * Attempt to get the previous sibling
-     * of a container in the event of a triple
-     * click.
-     *
-     * Adapted from http://stackoverflow.com/a/574922
-     */
-    function get_previoussibling(n) {
-        var y = n, x;
-        try {
-            x = n.previousSibling;
-            while (x && x.nodeType != 1) {
-                y = x;
-                x = x.previousSibling;
-            }
-        } catch (err) {
-            console.log(err);
-            topOffset = -15;
-            return y;
-        }
-        return x ? x : y;
-    }
+  var parentCommentContainer;
+ var originalElement;
+    (function ($) {
 
     var methods = {
         init: function (options) {
@@ -99,24 +62,42 @@
                  * some inspiration.
                  */
                 function insertSpanAfterSelection(clicks) {
+
                     var html = "<span class='dummy'><span>";
                     topOffset = 0;
                     leftOffset = 0;
+
                     if (numClicks !== clicks) return;
+                    if (numClicks === 3) return;
+
                     var isIE = (navigator.appName === "Microsoft Internet Explorer");
-                    var sel, range, expandedSelRange, node;
+                    var sel, range, expandedSelRange, span, origHtml, text, startText, endText, node;
                     var position;
                     if (window.getSelection) {
                         sel = window.getSelection();
                         selText = sel.toString();
 
                         if ($.trim(selText) === '' || selText.split(' ').length < settings.minWords) return;
+                        if (sel.anchorNode.parentElement != sel.extentNode.parentElement) return;
 
                         if (sel.getRangeAt && sel.rangeCount) {
-                            range = window.getSelection().getRangeAt(0);
+                            range = sel.getRangeAt(0);
+
+                            if (range.startOffset === 0 && range.endOffset === 0) {
+                                return;
+                            } else if(range.endOffset === 0) {
+                                return;
+                            }
 
                             expandedSelRange = range.cloneRange();
                             expandedSelRange.collapse(false);
+
+                            originalElement = $(range.startContainer.parentElement);
+                            span = '<span class="highlighted-section">' + sel + '</span>';
+                            text = originalElement.text();
+                            origHtml = originalElement.html();
+                            startText = text.substring(0, range.startOffset);
+                            endText = text.substring(range.endOffset, text.length);
 
                             // Range.createContextualFragment() would be useful here but is
                             // non-standard and not supported in all browsers (IE9, for one)
@@ -124,26 +105,8 @@
                             el.innerHTML = html;
                             var dummy = document.createElement("span");
 
-                            if (range.startOffset === 0 && range.endOffset === 0) {
-
-                                var cont = expandedSelRange.startContainer;
-                                var prev = get_previoussibling(cont);
-                                try {
-                                    expandedSelRange.selectNode(prev.lastChild);
-                                } catch (err) {
-                                    leftOffset = 40;
-                                    topOffset = -15;
-                                    expandedSelRange.selectNode(prev);
-                                }
-                                // console.log(expandedSelRange);
-                                expandedSelRange.collapse(false);
-                            } else if(range.endOffset === 0 ) {
-                                topOffset = -25;
-                                leftOffset = 40;
-                            }
-
-
                             if (numClicks !== clicks) return;
+
                             $(settings.selector).hide();
                             if (!isIE && $.trim(selText) === $.trim(expandedSelRange.startContainer.innerText)) {
                                 expandedSelRange.startContainer.innerHTML += "<span class='dummy'>&nbsp;</span>";
@@ -175,11 +138,17 @@
                         $(".dummy").remove();
                     }
 
+                    if (position.top === 0 && position.left === 0) return;
+
+                    originalElement.html(startText + span + endText);
+                    parentCommentContainer = $(expandedSelRange.commonAncestorContainer.offsetParent).closest('.commentable-section');
                     $(settings.selector).css("top", position.top + topOffset + "px");
                     $(settings.selector).css("left", position.left + leftOffset + "px");
-                    $(settings.selector).show(300, function() {
-                        settings.complete(selText);
-                    });
+
+                    // These parameters can be whatever you'd like
+                    settings.complete(originalElement, origHtml, selText, parentCommentContainer);
+                    $(settings.selector).show();
+
                 }
                 $(settings.selector).hide();
                 $(settings.selector).css("position", "absolute");
@@ -200,13 +169,6 @@
                         insertSpanAfterSelection(1);
                     }, 300);
                 });
-                $(this).bind('tripleclick.highlighter', function (e) {
-                    numClicks = 3;
-                    setTimeout(function () {
-                        insertSpanAfterSelection(3);
-                    }, 200);
-                });
-
                 $(this).bind('dblclick.highlighter', function (e) {
                     numClicks = 2;
                     setTimeout(function () {
@@ -224,7 +186,6 @@
             return this.each(function () {
                 $(document).unbind('mouseup.highlighter');
                 $(this).unbind('mouseup.highlighter');
-                $(this).unbind('tripleclick.highlighter');
                 $(this).unbind('dblclick.highlighter');
                 $(this).unbind('mousedown.highlighter');
             });
